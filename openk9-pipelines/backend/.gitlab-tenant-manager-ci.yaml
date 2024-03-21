@@ -1,0 +1,52 @@
+default:
+  image: eclipse-temurin:17-jdk
+  services:
+    - docker:19.03.13-dind
+  variables:
+    TEST_NAME: local/test
+    DOCKER_HOST: tcp://localhost:2375
+    DOCKER_TLS_CERTDIR: ""
+    MAVEN_CLI_OPTS: "--batch-mode"
+    MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+
+cache:
+  key: tenant-manager
+  paths:
+    - .m2/repository
+
+Build Tenant Manager Docker Image:
+  stage: build-docker
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      changes:
+        - core/app/tenant-manager/ci.properties
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+      changes:
+        - core/app/tenant-manager/ci.properties
+    - if: '$CI_COMMIT_REF_NAME =~ /^\d+-.+$/'
+      when: manual
+      variables:
+        QUARKUS_CONTAINER_IMAGE_TAG: "999-SNAPSHOT"
+  script:
+    - cd core
+    - ./mvnw package $MAVEN_CLI_OPTS -pl app/tenant-manager -am -Dquarkus.container-image.build=true -Dquarkus.container-image.push=true -Dquarkus.container-image.tag=${QUARKUS_CONTAINER_IMAGE_TAG:-latest}
+  after_script:
+    - curl -X POST -F token=$DEV_TOKEN -F "variables[TRIGGER_JOB]=deploy-tenant-manager" -F ref=master $DEV_TRIGGER_URL
+
+Deploy and Restart Tenant Manager:
+  image: curlimages/curl
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - core/app/tenant-manager/ci.properties
+      script:
+        - curl -X POST -F token=$DEPLOY_TOKEN -F "variables[TRIGGER_JOB]=deploy-tenant-manager" -F ref=master $DEPLOY_TRIGGER_URL
+    - if: '$CI_COMMIT_REF_NAME =~ /^\d+-.+$/'
+      changes:
+        - core/app/tenant-manager/ci.properties
+      script:
+        - curl -X POST -F token=$RESTART_TRIGGER_TOKEN -F "variables[TRIGGER_JOB]=restart-tenant-manager" -F ref=master $RESTART_TRIGGER_URL
+  before_script:
+    - apk add --update curl && rm -rf /var/cache/apk/*

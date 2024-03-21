@@ -1,0 +1,43 @@
+default:
+  image: eclipse-temurin:17-jdk
+  services:
+    - docker:19.03.13-dind
+  variables:
+    TEST_NAME: local/test
+    DOCKER_HOST: tcp://localhost:2375
+    DOCKER_TLS_CERTDIR: ""
+    MAVEN_CLI_OPTS: "--batch-mode"
+    MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+    CONTAINER_IMAGE_CONTEXT: "app/ingestion" 
+
+cache:
+  key: ingestion
+  paths:
+    - .m2/repository
+
+Build Ingestion Docker Image:
+  stage: build-docker
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      changes:
+        - core/$CONTAINER_IMAGE_CONTEXT/ci.properties
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+      changes:
+        - core/$CONTAINER_IMAGE_CONTEXT/ci.properties
+  script:
+    - cd core
+    - ./mvnw package $MAVEN_CLI_OPTS -pl $CONTAINER_IMAGE_CONTEXT -am -Dquarkus.container-image.build=true -Dquarkus.container-image.push=true
+
+trigger_deploy_ingestion:
+  image: curlimages/curl
+  stage: deploy
+  needs: ['Build Ingestion Docker Image']
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - core/$CONTAINER_IMAGE_CONTEXT/ci.properties
+  before_script:
+    - apk add --update curl && rm -rf /var/cache/apk/*
+  script:
+    - curl -X POST -F token=$DEPLOY_TOKEN -F "variables[TRIGGER_JOB]=deploy-ingestion" -F ref=master $DEPLOY_TRIGGER_URL

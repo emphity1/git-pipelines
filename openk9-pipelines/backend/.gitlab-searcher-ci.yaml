@@ -1,0 +1,43 @@
+default:
+  image: eclipse-temurin:17-jdk
+  services:
+    - docker:19.03.13-dind
+  variables:
+    TEST_NAME: local/test
+    DOCKER_HOST: tcp://localhost:2375
+    DOCKER_TLS_CERTDIR: ""
+    MAVEN_CLI_OPTS: "--batch-mode"
+    MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+
+cache:
+  key: searcher
+  paths:
+    - .m2/repository
+
+Build Searcher Docker Image:
+  stage: build-docker
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      changes:
+        - core/app/searcher/ci.properties
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+      changes:
+        - core/app/searcher/ci.properties
+  script:
+    - cd core
+    - ./mvnw package $MAVEN_CLI_OPTS -pl app/searcher -am -Dquarkus.container-image.build=true -Dquarkus.container-image.push=true
+  after_script:
+    - curl -X POST -F token=$DEV_TOKEN -F "variables[TRIGGER_JOB]=deploy-searcher" -F ref=master $DEV_TRIGGER_URL
+
+trigger_deploy_searcher:
+  image: curlimages/curl
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - core/app/searcher/ci.properties
+  before_script:
+    - apk add --update curl && rm -rf /var/cache/apk/*
+  script:
+    - curl -X POST -F token=$DEPLOY_TOKEN -F "variables[TRIGGER_JOB]=deploy-searcher" -F ref=master $DEPLOY_TRIGGER_URL

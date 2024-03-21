@@ -1,0 +1,58 @@
+default:
+  image: eclipse-temurin:17-jdk
+  services:
+    - docker:19.03.13-dind
+  variables:
+    TEST_NAME: local/test
+    DOCKER_HOST: tcp://localhost:2375
+    DOCKER_TLS_CERTDIR: ""
+    MAVEN_CLI_OPTS: "--batch-mode"
+    MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+    CONTAINER_IMAGE_TAG: "latest"
+
+cache:
+  key: datasource
+  paths:
+    - .m2/repository
+
+Build Docker Image:
+  stage: build-docker
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      variables:
+        CONTAINER_IMAGE_TAG: $CI_COMMIT_TAG
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+    - if: '/^\d+-.+$/'
+      when: manual
+      variables:
+        CONTAINER_IMAGE_TAG: "999-SNAPSHOT"
+  script:
+    - cd core
+    - ./mvnw package $MAVEN_CLI_OPTS -pl ../vendor/hibernate-rx-multitenancy/deployment,app/datasource -am -Dquarkus.container-image.build=true -Dquarkus.container-image.push=true -Dquarkus.container-image.tag=$CONTAINER_IMAGE_TAG
+
+trigger_deploy_datasource:
+  image: curlimages/curl
+  stage: deploy
+  needs: ['Build Docker Image']
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_COMMIT_MESSAGE =~ /ci.properties/'
+  before_script:
+    - apk add --update curl && rm -rf /var/cache/apk/*
+  script:
+    - curl -X POST -F token=$DEPLOY_TOKEN -F "variables[TRIGGER_JOB]=deploy-datasource" -F ref=master $DEPLOY_TRIGGER_URL
+
+
+
+trigger_restart_datasource:
+  image: curlimages/curl
+  stage: deploy
+  needs: ['Build Docker Image']
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^\d+-.+$/'
+      changes:
+        - core/app/datasource/ci.properties
+  before_script:
+    - apk add --update curl && rm -rf /var/cache/apk/*
+  script:
+    - curl -X POST -F token=$RESTART_TRIGGER_TOKEN -F "variables[TRIGGER_JOB]=restart-datasource" -F ref=master $RESTART_TRIGGER_URL
