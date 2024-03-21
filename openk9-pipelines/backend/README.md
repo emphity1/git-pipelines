@@ -14,7 +14,7 @@
 
 
 ---
-
+### Workflow tra openk9 e openk9-helm-local
 
 - nel repo Openk9 si definisce la parte di pipeline che fa test, build and push immagine
 - nel repo Openk9 Helm local si definisce la parte di pipeline che fa deploy immagine
